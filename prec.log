@@ -1,0 +1,16 @@
+building vocab...
+Vocab size (>=5):  23379
+building done!
+
+Converting train
+	num. sents:  23767
+	num. samples:  2051910
+
+Converting val
+	num. sents:  2461
+	num. samples:  213886
+
+Converting test
+	num. sents:  2891
+	num. samples:  241211
+
