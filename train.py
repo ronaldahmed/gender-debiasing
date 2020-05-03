@@ -10,7 +10,8 @@ import numpy as np
 from tqdm import tqdm
 from torch.optim import Adam
 from torch.utils.data import Dataset, DataLoader
-from model import Word2Vec, SGNS
+from model import Word2Vec, SGNS, GenderClassifier, GetGenderLoss
+
 
 import pdb
 
@@ -33,8 +34,8 @@ def parse_args():
     parser.add_argument('--conti', action='store_true', help="continue learning")
     parser.add_argument('--weights', action='store_true', help="use weights for negative sampling")
     parser.add_argument('--cuda', action='store_true', help="use CUDA")
+    parser.add_argument('--DLossBeta', type=float, default=1., help="weight of Discriminator Loss in W2V training")
     return parser.parse_args()
-
 
 class PermutedSubsampledCorpus(Dataset):
 
@@ -53,11 +54,13 @@ class PermutedSubsampledCorpus(Dataset):
 
     def __getitem__(self, idx):
         iword, owords = self.data[idx]
-        return iword, np.array(owords)
+        return iword, np.array(owords, dtype=np.int64)
 
 
 def train(args):
     idx2word = pickle.load(open(os.path.join(args.data_dir, 'idx2word.dat'), 'rb'))
+    word2idx = pickle.load(
+        open(os.path.join(args.data_dir, 'word2idx.dat'), 'rb'))
     wc = pickle.load(open(os.path.join(args.data_dir, 'wc.dat'), 'rb'))
     wf = np.array([wc[word] for word in idx2word])
     wf = wf / wf.sum()
@@ -73,6 +76,10 @@ def train(args):
 
     model = Word2Vec(vocab_size=vocab_size, embedding_size=args.e_dim)
     sgns = SGNS(embedding=model, vocab_size=vocab_size, n_negs=args.n_negs, weights=weights)
+
+    ## create gender classifier, currently it is 2-layer mlp
+    gc_i = GenderClassifier(args.e_dim)
+    gc_o = GenderClassifier(args.e_dim)
     
     # load pre-trained model
     if args.load_model != -1:
@@ -81,12 +88,19 @@ def train(args):
 
     if args.cuda:
         sgns = sgns.cuda()
+        gc_i = gc_i.cuda()
+        gc_o = gc_o.cuda()
+
+    gc_loss = GetGenderLoss(embedding=model, iclassifier=gc_i,
+                            oclassifier=gc_o, word2idx=word2idx)
 
     optim = Adam(sgns.parameters())
     if args.load_model != -1:
         optimpath = os.path.join(log_dir, "optim_%d.pt" % args.load_model)
         optim.load_state_dict(torch.load(optimpath))
 
+    optim_D = Adam(list(gc_i.parameters()) + list(gc_o.parameters()))
+    beta = args.DLossBeta
     for epoch in range(args.epoch):
         dataset = PermutedSubsampledCorpus(os.path.join(args.data_dir, 'train.dat'))
         dataloader = DataLoader(dataset, batch_size=args.mb, shuffle=True)
@@ -95,14 +109,32 @@ def train(args):
         pbar.set_description("[Epoch {}]".format(epoch))
         cnt = 0
         for iword, owords in pbar:
-            loss = sgns(iword, owords)
+            
+            ## The loss for embedding to update, and the embeddding is to fool the gender classifier to make wrong classification
+            Eloss = sgns(iword, owords)
+            Eloss += beta * gc_loss.forward_E(iword,owords)
             optim.zero_grad()
-            loss.backward()
+            Eloss.backward()
             optim.step()
-            pbar.set_postfix(loss=loss.item())
+            #pbar.set_postfix(loss=loss.item())
 
-            if cnt > 2:
-                break
+            for steps in range(1):
+                ## The loss for gender classifier
+                Dloss, acci, acco = gc_loss.forward_D(iword, owords, acc=True)
+
+                optim_D.zero_grad()
+                Dloss.backward()
+                optim_D.step()
+
+            pbar.set_postfix(dict(acci=acci.item(),
+                                  acco=acco.item(),
+                                  sgl=float(gc_loss.effect_words) /
+                                  gc_loss.tot_words,
+                                  Dloss=Dloss.item(),
+                                  Eloss=Eloss.item()))
+
+            #if cnt > 2:
+            #    break
             cnt += 1
 
         ## run eval here & save progress
@@ -110,8 +142,8 @@ def train(args):
         optim_name = os.path.join(log_dir, "optim_%d.pt" % epoch)
         emb_name = os.path.join(log_dir, "emb_%d.vec" % epoch)
 
-        print("-> sanity check")
-        pdb.set_trace()
+        #print("-> sanity check")
+        #pdb.set_trace()
 
         torch.save(sgns.state_dict(),model_name)
         torch.save(optim.state_dict(),optim_name)
@@ -126,8 +158,11 @@ def train(args):
 def dump_embeddings_txt(emb_matrix,emb_name,idx2word):
     with open(emb_name,'w') as outfile:
         print("%d %d" % emb_matrix.shape,file=outfile)
-        for idx,wd in idx2word.items():
-            print(wd," ".join([str(x) for x in emb_matrix[idx,:]]),file=outfile)
+        for idx,wd in enumerate(idx2word):
+            try:
+                print(wd," ".join([str(x) for x in emb_matrix[idx,:]]),file=outfile)
+            except:
+                pass
         #
 
 

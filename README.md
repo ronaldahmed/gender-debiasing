@@ -15,3 +15,8 @@ conda env create -f gender-deb.yml
 or from txt file
 conda create --name gender-deb --file requirements.txt
 
+The program is only tested on the cuda setting. Running on CPU may generates fault.
+
+To get semi supervise labeled gendered words:
+First run semi_annotate/semi_annotate_gender_label.py to preprocess the PCA decomposition and extration. It will generate json files under semi_annotate directory.
+
