@@ -23,14 +23,14 @@ def get_model_vecs(model, words):
     assert model_name in ["w2v", "glove_wiki", "glove_twitter"]
     vecs = []
     for word in words:
-        if word in model.wv:
-            vec = model.wv[word]
-            #print(word,vec)    
-            vecs.append(vec)
+        #if word in model.wv:
+        vec = model.wv[word]
+        #print(word,vec)    
+        vecs.append(vec)
     return vecs
 
 def normalized(vec):
-    vec = vec / np.sqrt(np.sum(np.square(vec)))
+    vec = vec / np.linalg.norm(vec)
     return vec
 
 
@@ -57,8 +57,7 @@ if __name__=="__main__":
         councilwoman, princes, matriarch, colts, ma, fraternities, pa, fellas, councilmen, dowry, barbershop, fraternal,
         ballerina"""
 
-    pairs = [["she", "he"], ["her", "his"], ["woman", "man"], ["mary", "john"], ["herself", "himself"], [
-        "daughter", "son"], ["mother", "father"], ["gal", "guy"], ["girl", "boy"], ["female", "male"]]
+    pairs = [["she", "he"], ["her", "his"], ["woman", "man"], ["Mary", "John"], ["herself", "himself"], ["daughter", "son"], ["mother", "father"], ["gal", "guy"], ["girl", "boy"], ["female", "male"], ["wife", "husband"], ["girlfriend", "boyfriend"] ,["sister", "brother"]]
 
     #os.chdir(os.path.join(".", "semi_annotate"))
     for model_name in ["w2v", "glove_wiki", "glove_twitter"]:
@@ -66,8 +65,13 @@ if __name__=="__main__":
         print("model name: ", model_name)
         vecs = []
         for pair in pairs:
+            # refer to code https://github.com/tolga-b/debiaswe/blob/master/debiaswe/we.py from paper man is to ...
             vec1, vec2 = get_model_vecs(model, pair)
-            vecs.append(vec1 - vec2)
+            vec1 = normalized(vec1)
+            vec2 = normalized(vec2)
+            center = (vec1 + vec2) / 2
+            vecs.append(vec1 - center)
+            vecs.append(vec2 - center)
         pca = decomposition.PCA()
         pca.fit(vecs)
 
@@ -82,9 +86,9 @@ if __name__=="__main__":
         projs = []
         proj_dict = {}
         for item in model.wv.vocab:
-            proj = np.dot(mcp, model.wv[item])
+            proj = np.dot(mcp, normalized(model.wv[item]))
             projs.append(proj)
-            proj_dict[item] = proj
+            proj_dict[item] = (proj, model.vocab[item].count)
         plt.figure(figsize=(10, 10))
         sns.distplot(projs, hist=True, kde=False, norm_hist=True,
                     color='blue',

@@ -81,18 +81,18 @@ class GenderClassifier(nn.Module):
         super().__init__()
         self.word_dim = word_dim
         if hidden_units is None:
-            hidden_units = word_dim // 2
+            hidden_units = word_dim * 2
         self.bn0 = nn.BatchNorm1d(word_dim)
         self.dense1 = nn.Linear(word_dim, hidden_units)
-        self.bn1 = nn.BatchNorm1d(hidden_units)
+        #self.bn1 = nn.BatchNorm1d(hidden_units)
         self.dense2 = nn.Linear(hidden_units, 2)
-        self.act = nn.LeakyReLU()
+        self.act = t.nn.Tanh()  # nn.LeakyReLU()
     
     def forward(self, input):
         input = self.bn0(input)
         hidden = self.dense1(input)
         hidden = self.act(hidden)
-        hidden = self.bn1(hidden)
+        #hidden = self.bn1(hidden)
         output = self.dense2(hidden)
         return output
 
@@ -102,7 +102,7 @@ def softmax_cross_entropy(input, target, mask = None):
     target = target.unsqueeze(1)
     mask = mask.unsqueeze(1)
     logpy = t.gather(logp, 1, target).view(-1)
-    print(logpy[3:4].item())
+    #print(logpy[3:4].item())
     if mask is None:
         logpy =  logpy.mean()
     else:
@@ -115,7 +115,7 @@ def softmax_cross_entropy_uniform(input):
     #print(input.shape, target.shape, mask.shape)
     logp = - F.log_softmax(input, dim=1)
     classes = list(input.size())[1]
-    uni_dist = (t.ones(size=(1, classes), dtype=t.float32) / classes).cuda()
+    uni_dist = (t.ones(size=(1, classes), dtype=t.float32) / float(classes)).cuda()
 
     logpy = logp * uni_dist
     logpy = logpy.sum(1).mean()
@@ -133,31 +133,44 @@ class GetGenderLoss(nn.Module):
         self.iclassifier = iclassifier
         self.oclassifier = oclassifier
         self.embedding = embedding
+        self.word2idx = word2idx
         ## This is gendered words, approx ~ 120k words pos v neg
         neg_words, pos_words = get_gendered_words()
         self.neg_ids = set()
         self.pos_ids = set()
         self.gendered_ids = set()
         for _w in neg_words:
-            if _w in word2idx:
-                self.neg_ids.add(word2idx[_w])
-                self.gendered_ids.add(word2idx[_w])
+            self.add_mutate(self.neg_ids, _w)
+            self.add_mutate(self.gendered_ids, _w)
         for _w in pos_words:
-            if _w in word2idx:
-                self.pos_ids.add(word2idx[_w])
-                self.gendered_ids.add(word2idx[_w])
+            self.add_mutate(self.pos_ids, _w)
+            self.add_mutate(self.gendered_ids, _w)
         self.criterion = softmax_cross_entropy
         self.effect_words = 0
         self.pos_words = 0
         self.tot_words = 0
 
+    def add_ids(self, _set, word):
+         if word in self.word2idx:
+             _set.add(self.word2idx[word])
+
+    def add_mutate(self, _set, word):
+
+        words = [word, word.replace("_", " ")]
+        for word in words:
+            self.add_ids(_set, word)
+            self.add_ids(_set, word.lower())
+            self.add_ids(_set, word.upper())
+            self.add_ids(_set, word[0].upper()+word[1:].lower())
+        
+
     def get_label(self, word):
         if word in self.gendered_ids:
-            if word in self.neg_ids:
-                return 0
-            elif word in self.pos_ids:
+            if word in self.pos_ids:
                 self.pos_words += 1
                 return 1
+            elif word in self.neg_ids:
+                return 0
         else:
             return 2
 
@@ -187,11 +200,7 @@ class GetGenderLoss(nn.Module):
         wordsn = []
         for word in words.tolist():
             _label = self.get_label(word)
-            if _label == 2:
-                #masks.append(0.)
-                ## otherwise it might cause problem
-                _label = 1
-            else:
+            if _label != 2:
                 masks.append(1.)
                 self.effect_words += 1
                 wordsn.append(word)

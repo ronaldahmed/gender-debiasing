@@ -56,6 +56,21 @@ class PermutedSubsampledCorpus(Dataset):
         iword, owords = self.data[idx]
         return iword, np.array(owords, dtype=np.int64)
 
+def get_pos_neg_iter(neg_ids, pos_ids, batch_size = 1024):
+    neg_ids = np.array(list(neg_ids))
+    pos_ids = np.array(list(pos_ids))
+    while True:
+        np.random.shuffle(neg_ids)
+        np.random.shuffle(pos_ids)
+        l = max(len(neg_ids), len(pos_ids))
+        ## for each class, only half of samples are needed
+        batch_sz = batch_size // 2
+        batch = l  // batch_sz -1
+
+        for i in range(batch):
+            # return id , label
+            yield np.concatenate([neg_ids[i*batch_sz:(i+1)*batch_sz],pos_ids[i*batch_sz:(i+1)*batch_sz]], axis=0), np.array([0]*batch_sz+[1]*batch_sz)
+        
 
 def train(args):
     idx2word = pickle.load(open(os.path.join(args.data_dir, 'idx2word.dat'), 'rb'))
@@ -99,13 +114,14 @@ def train(args):
 
     gc_loss = GetGenderLoss(embedding=model, iclassifier=gc_i,
                             oclassifier=gc_o, word2idx=word2idx)
-
+    gc_iter = get_pos_neg_iter(gc_loss.neg_ids, gc_loss.pos_ids, batch_size=512)
+    criterion = torch.nn.CrossEntropyLoss()
     optim = Adam(sgns.parameters())
     if args.load_model != -1:
         optimpath = os.path.join(log_dir, "optim_%d.pt" % args.load_model)
         optim.load_state_dict(torch.load(optimpath))
 
-    optim_D = Adam(list(gc_i.parameters()) + list(gc_o.parameters()), lr=1e-3)
+    optim_D = SGD(list(gc_i.parameters()) + list(gc_o.parameters()), lr=1e-2)
     beta = args.DLossBeta
     for epoch in range(args.epoch):
         dataset = PermutedSubsampledCorpus(os.path.join(args.data_dir, 'train.dat'))
@@ -119,32 +135,42 @@ def train(args):
             ## The loss for embedding to update, and the embeddding is to fool the gender classifier to make wrong classification
             optim.zero_grad()
             Eloss1 = sgns(iword, owords)
-            Eloss2 = beta * gc_loss.forward_E(iword,owords[:,4:5])
+            Eloss2 = beta *  gc_loss.forward_E(iword, owords[:, 4:5]) #(- gc_loss.forward_D(iword, owords[:, 4:5]))  #
             Eloss = Eloss1+ Eloss2
             Eloss.backward()
             optim.step()
             #pbar.set_postfix(loss=loss.item())
 
-            """BatchSize=512
-            for steps in range(4096//BatchSize):
-                start = BatchSize*steps
-                end = BatchSize*(steps+1)"""
+            """"""
             ## The loss for gender classifier
-            optim_D.zero_grad()
-            Dloss, acci, acco = gc_loss.forward_D(
-                iword, owords[:,4:5], acc=True)
-            Dloss.backward()
-            optim_D.step()
+            if epoch>=0:
+                """
+                BatchSize = 512
+                for steps in range(4096//BatchSize):
+                    start = BatchSize*steps
+                    end = BatchSize*(steps+1)
+                    optim_D.zero_grad()
+                    Dloss, acci, acco = gc_loss.forward_D(
+                        iword[start:end], owords[start:end,4:5], acc=True)
+                    Dloss.backward()
+                    optim_D.step()
+                """
+                ids, labels = next(gc_iter)
+                labels = torch.LongTensor(labels).cuda()
+                Dloss = criterion(gc_i(model.forward_i(ids)), labels)+ criterion(gc_o(model.forward_o(ids)), labels)
+                optim_D.zero_grad()
+                Dloss.backward()
+                optim_D.step()
 
-            pbar.set_postfix(dict(acci=acci.item(),
-                                acco=acco.item(),
-                                ## gendered words percentage / signal rate
-                                sr=float(gc_loss.effect_words) / gc_loss.tot_words,
-                                ## pos gendered words percentage / positve rate
-                                pr=float(gc_loss.pos_words) / gc_loss.effect_words,
-                                Dloss=Dloss.item(),
-                                Eloss1=Eloss1.item(),
-                                Eloss2=Eloss2.item()))
+                pbar.set_postfix(dict(#acci=acci.item(),
+                                    #acco=acco.item(),
+                                    ## gendered words percentage or signal rate
+                                    sr=float(gc_loss.effect_words) / gc_loss.tot_words,
+                                    ## pos gendered words percentage or positve rate
+                                    pr=float(gc_loss.pos_words) / gc_loss.effect_words,
+                                    Dloss=Dloss.item(),
+                                    Eloss1=Eloss1.item(),
+                                    Eloss2=Eloss2.item()))
 
             #if cnt > 2:
             #    break
