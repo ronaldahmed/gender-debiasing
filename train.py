@@ -135,6 +135,9 @@ def train(args):
             ## The loss for embedding to update, and the embeddding is to fool the gender classifier to make wrong classification
             optim.zero_grad()
             Eloss1 = sgns(iword, owords)
+            # They have batch normalization during training
+            gc_i.eval()
+            gc_o.eval()
             Eloss2 = beta *  gc_loss.forward_E(iword, owords[:, 4:5]) #(- gc_loss.forward_D(iword, owords[:, 4:5]))  #
             Eloss = Eloss1+ Eloss2
             Eloss.backward()
@@ -144,6 +147,8 @@ def train(args):
             """"""
             ## The loss for gender classifier
             if epoch>=0:
+                gc_i.train()
+                gc_o.train()
                 """
                 BatchSize = 512
                 for steps in range(4096//BatchSize):
