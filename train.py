@@ -8,7 +8,7 @@ import torch
 import numpy as np
 
 from tqdm import tqdm
-from torch.optim import Adam
+from torch.optim import Adam, SGD
 from torch.utils.data import Dataset, DataLoader
 from model import Word2Vec, SGNS, GenderClassifier, GetGenderLoss
 
@@ -77,9 +77,15 @@ def train(args):
     model = Word2Vec(vocab_size=vocab_size, embedding_size=args.e_dim)
     sgns = SGNS(embedding=model, vocab_size=vocab_size, n_negs=args.n_negs, weights=weights)
 
+
+    only_on_classifier = False
     ## create gender classifier, currently it is 2-layer mlp
     gc_i = GenderClassifier(args.e_dim)
-    gc_o = GenderClassifier(args.e_dim)
+    if only_on_classifier:
+        gc_o = gc_i
+    else:
+        gc_o = GenderClassifier(args.e_dim)
+
     
     # load pre-trained model
     if args.load_model != -1:
@@ -99,7 +105,7 @@ def train(args):
         optimpath = os.path.join(log_dir, "optim_%d.pt" % args.load_model)
         optim.load_state_dict(torch.load(optimpath))
 
-    optim_D = Adam(list(gc_i.parameters()) + list(gc_o.parameters()))
+    optim_D = Adam(list(gc_i.parameters()) + list(gc_o.parameters()), lr=1e-3)
     beta = args.DLossBeta
     for epoch in range(args.epoch):
         dataset = PermutedSubsampledCorpus(os.path.join(args.data_dir, 'train.dat'))
@@ -111,44 +117,52 @@ def train(args):
         for iword, owords in pbar:
             
             ## The loss for embedding to update, and the embeddding is to fool the gender classifier to make wrong classification
-            Eloss = sgns(iword, owords)
-            Eloss += beta * gc_loss.forward_E(iword,owords)
             optim.zero_grad()
+            Eloss1 = sgns(iword, owords)
+            Eloss2 = beta * gc_loss.forward_E(iword,owords[:,4:5])
+            Eloss = Eloss1+ Eloss2
             Eloss.backward()
             optim.step()
             #pbar.set_postfix(loss=loss.item())
 
-            for steps in range(1):
-                ## The loss for gender classifier
-                Dloss, acci, acco = gc_loss.forward_D(iword, owords, acc=True)
-
-                optim_D.zero_grad()
-                Dloss.backward()
-                optim_D.step()
+            """BatchSize=512
+            for steps in range(4096//BatchSize):
+                start = BatchSize*steps
+                end = BatchSize*(steps+1)"""
+            ## The loss for gender classifier
+            optim_D.zero_grad()
+            Dloss, acci, acco = gc_loss.forward_D(
+                iword, owords[:,4:5], acc=True)
+            Dloss.backward()
+            optim_D.step()
 
             pbar.set_postfix(dict(acci=acci.item(),
-                                  acco=acco.item(),
-                                  sgl=float(gc_loss.effect_words) /
-                                  gc_loss.tot_words,
-                                  Dloss=Dloss.item(),
-                                  Eloss=Eloss.item()))
+                                acco=acco.item(),
+                                ## gendered words percentage / signal rate
+                                sr=float(gc_loss.effect_words) / gc_loss.tot_words,
+                                ## pos gendered words percentage / positve rate
+                                pr=float(gc_loss.pos_words) / gc_loss.effect_words,
+                                Dloss=Dloss.item(),
+                                Eloss1=Eloss1.item(),
+                                Eloss2=Eloss2.item()))
 
             #if cnt > 2:
             #    break
             cnt += 1
 
         ## run eval here & save progress
-        model_name = os.path.join(log_dir, "model_%d.pt" % epoch)
-        optim_name = os.path.join(log_dir, "optim_%d.pt" % epoch)
-        emb_name = os.path.join(log_dir, "emb_%d.vec" % epoch)
+        if epoch % 10==0:
+            model_name = os.path.join(log_dir, "model_%d.pt" % epoch)
+            optim_name = os.path.join(log_dir, "optim_%d.pt" % epoch)
+            emb_name = os.path.join(log_dir, "emb_%d.vec" % epoch)
 
-        #print("-> sanity check")
-        #pdb.set_trace()
+            #print("-> sanity check")
+            #pdb.set_trace()
 
-        torch.save(sgns.state_dict(),model_name)
-        torch.save(optim.state_dict(),optim_name)
-        dump_embeddings_txt(model.ivectors.weight.data.cpu().numpy(),
-                    emb_name,idx2word)
+            torch.save(sgns.state_dict(),model_name)
+            torch.save(optim.state_dict(),optim_name)
+            dump_embeddings_txt(model.ivectors.weight.data.cpu().numpy(),
+                        emb_name,idx2word)
 
     # pickle.dump(idx2vec, open(os.path.join(args.data_dir, 'idx2vec.dat'), 'wb'))
     # torch.save(sgns.state_dict(), os.path.join(args.save_dir, '{}.pt'.format(args.name)))

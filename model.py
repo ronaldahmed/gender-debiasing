@@ -9,7 +9,7 @@ from torch import LongTensor as LT
 from torch import IntTensor as IT
 from torch import FloatTensor as FT
 
-from semi_annotate.get_gendered_word import get_gendered_words
+from  semi_annotate.get_gendered_word import get_gendered_words
 class Bundler(nn.Module):
 
     def forward(self, data):
@@ -81,14 +81,18 @@ class GenderClassifier(nn.Module):
         super().__init__()
         self.word_dim = word_dim
         if hidden_units is None:
-            hidden_units = word_dim * 4
+            hidden_units = word_dim // 2
+        self.bn0 = nn.BatchNorm1d(word_dim)
         self.dense1 = nn.Linear(word_dim, hidden_units)
+        self.bn1 = nn.BatchNorm1d(hidden_units)
         self.dense2 = nn.Linear(hidden_units, 2)
-        self.act = nn.ReLU()
+        self.act = nn.LeakyReLU()
     
     def forward(self, input):
+        input = self.bn0(input)
         hidden = self.dense1(input)
         hidden = self.act(hidden)
+        hidden = self.bn1(hidden)
         output = self.dense2(hidden)
         return output
 
@@ -98,11 +102,12 @@ def softmax_cross_entropy(input, target, mask = None):
     target = target.unsqueeze(1)
     mask = mask.unsqueeze(1)
     logpy = t.gather(logp, 1, target).view(-1)
+    print(logpy[3:4].item())
     if mask is None:
         logpy =  logpy.mean()
     else:
         #mask = FT(mask)
-        logpy = (logp * mask).mean()
+        logpy = (logp * mask).sum() / (mask.sum() + 1e-5)
     return logpy
 
 
@@ -110,10 +115,10 @@ def softmax_cross_entropy_uniform(input):
     #print(input.shape, target.shape, mask.shape)
     logp = - F.log_softmax(input, dim=1)
     classes = list(input.size())[1]
-    uni_dist = t.ones(size=(1,classes), dtype = t.float32).cuda() / classes
+    uni_dist = (t.ones(size=(1, classes), dtype=t.float32) / classes).cuda()
 
-    logpy = -logp * uni_dist
-    logpy = logpy.mean()
+    logpy = logp * uni_dist
+    logpy = logpy.sum(1).mean()
     return logpy
 
 def t_size(tensor):
@@ -143,6 +148,7 @@ class GetGenderLoss(nn.Module):
                 self.gendered_ids.add(word2idx[_w])
         self.criterion = softmax_cross_entropy
         self.effect_words = 0
+        self.pos_words = 0
         self.tot_words = 0
 
     def get_label(self, word):
@@ -150,6 +156,7 @@ class GetGenderLoss(nn.Module):
             if word in self.neg_ids:
                 return 0
             elif word in self.pos_ids:
+                self.pos_words += 1
                 return 1
         else:
             return 2
@@ -162,28 +169,52 @@ class GetGenderLoss(nn.Module):
             _label = self.get_label(word)
             if _label==2:
                 masks.append(0.)
+                ## otherwise it might cause problem
+                _label = 1
             else:
                 masks.append(1.)
                 self.effect_words += 1
-            labels.append(_label)
+                labels.append(_label)
 
         labels = LT(labels).cuda()
         masks = IT(masks).cuda()
         return words, labels, masks
 
+    def prepare_filter_words(self, words):
+        words = words.view(-1)
+        labels = []
+        masks = []
+        wordsn = []
+        for word in words.tolist():
+            _label = self.get_label(word)
+            if _label == 2:
+                #masks.append(0.)
+                ## otherwise it might cause problem
+                _label = 1
+            else:
+                masks.append(1.)
+                self.effect_words += 1
+                wordsn.append(word)
+                labels.append(_label)
+
+        labels = LT(labels).cuda()
+        masks = IT(masks).cuda()
+        wordsn = LT(wordsn)
+        return wordsn, labels, masks
+
     def forward_D(self, iword, owords, acc = False):
         #print(iword.shape)
         #print(owords.shape)
-        iwords, ilabels, imasks = self.prepare_words(iword)
+        iwords, ilabels, imasks = self.prepare_filter_words(iword)
         ilogits = self.iclassifier(self.embedding.forward_i(iwords))
-        loss = self.criterion(ilogits, ilabels, imasks)
+        loss = self.criterion(ilogits, ilabels, imasks) 
         if acc:
             max_index = ilogits.argmax(dim=1)
             _acc1 = ((max_index.eq(ilabels)).float() *
                     imasks).sum() / imasks.sum().float()
-        owords, olabels, omasks = self.prepare_words(owords)
+        owords, olabels, omasks = self.prepare_filter_words(owords)
         ologits = self.oclassifier(self.embedding.forward_o(owords))
-        loss += self.criterion(ologits, olabels, omasks)
+        loss += self.criterion(ologits, olabels, omasks) 
         self.tot_words += t_size(owords) + t_size(iword)
         if acc:
             max_index = ologits.argmax(dim=1)
