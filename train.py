@@ -81,7 +81,7 @@ def train(args):
     only_one_classifier = False
     ## create gender classifier, currently it is 2-layer mlp
     gc_i = GenderClassifier(args.e_dim)
-    if only_on_classifier:
+    if only_one_classifier:
         gc_o = gc_i
     else:
         gc_o = GenderClassifier(args.e_dim)
