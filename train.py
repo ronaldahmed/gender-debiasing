@@ -138,15 +138,22 @@ def train(args):
             # They have batch normalization during training
             gc_i.eval()
             gc_o.eval()
-            Eloss2 = beta *  gc_loss.forward_E(iword, owords[:, 4:5]) #(- gc_loss.forward_D(iword, owords[:, 4:5]))  #
-            Eloss = Eloss1+ Eloss2
+            
+            Eloss = Eloss1
+            Eloss2 = beta * gc_loss.forward_E(iword, owords[:, 4:5])
+            if epoch>=10:
+                # warmup for classification
+                # (- gc_loss.forward_D(iword, owords[:, 4:5]))  #
+                Eloss += Eloss2
+
             Eloss.backward()
             optim.step()
             #pbar.set_postfix(loss=loss.item())
 
             """"""
             ## The loss for gender classifier
-            if epoch>=0:
+            if epoch>=5:
+                #warmup for w2v
                 gc_i.train()
                 gc_o.train()
                 """
@@ -170,9 +177,9 @@ def train(args):
                 pbar.set_postfix(dict(#acci=acci.item(),
                                     #acco=acco.item(),
                                     ## gendered words percentage or signal rate
-                                    sr=float(gc_loss.effect_words) / gc_loss.tot_words,
+                                    sr=float(gc_loss.effect_words) / (gc_loss.tot_words +1e-5),
                                     ## pos gendered words percentage or positve rate
-                                    pr=float(gc_loss.pos_words) / gc_loss.effect_words,
+                                    pr=float(gc_loss.pos_words) / (gc_loss.effect_words+1e-5),
                                     Dloss=Dloss.item(),
                                     Eloss1=Eloss1.item(),
                                     Eloss2=Eloss2.item()))
