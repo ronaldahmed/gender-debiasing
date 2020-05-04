@@ -78,7 +78,7 @@ def train(args):
     sgns = SGNS(embedding=model, vocab_size=vocab_size, n_negs=args.n_negs, weights=weights)
 
 
-    only_on_classifier = False
+    only_one_classifier = False
     ## create gender classifier, currently it is 2-layer mlp
     gc_i = GenderClassifier(args.e_dim)
     if only_on_classifier:
