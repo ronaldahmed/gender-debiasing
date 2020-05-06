@@ -6,4 +6,8 @@ data/
 *.png
 *.json
 *.log
-
+.idea/
+.ipynb_checkpoints/
+.vscode/
+stopwords/
+.DS_Store
