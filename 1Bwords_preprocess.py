@@ -2,11 +2,8 @@
 
 from IPython import get_ipython
 get_ipython().run_line_magic('matplotlib', 'osx')
-import matplotlib.pyplot as plt
-import numpy as np
 import nltk
 nltk.download('wordnet')
-nltk.download('stopwords')
 from tqdm import tqdm
 from nltk.corpus import wordnet as wn
 import yaml
