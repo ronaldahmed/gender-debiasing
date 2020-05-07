@@ -81,15 +81,17 @@ class GenderClassifier(nn.Module):
         super().__init__()
         self.word_dim = word_dim
         if hidden_units is None:
-            hidden_units = word_dim * 2
-        self.bn0 = nn.BatchNorm1d(word_dim)
+            hidden_units = 32#word_dim * 6
+        #self.bn0 = nn.BatchNorm1d(word_dim)
         self.dense1 = nn.Linear(word_dim, hidden_units)
-        #self.bn1 = nn.BatchNorm1d(hidden_units)
+        
+        self.dense1.weight.data.uniform_(-0.5 / self.word_dim, 0.5 / self.word_dim)
+        self.bn1 = nn.BatchNorm1d(hidden_units)
         self.dense2 = nn.Linear(hidden_units, 2)
-        self.act = t.nn.Tanh()  # nn.LeakyReLU()
+        self.act = t.nn.Sigmoid()#Tanh()  # nn.LeakyReLU()
     
     def forward(self, input):
-        input = self.bn0(input)
+        #input = self.bn0(input)
         hidden = self.dense1(input)
         hidden = self.act(hidden)
         #hidden = self.bn1(hidden)
@@ -145,23 +147,49 @@ class GetGenderLoss(nn.Module):
         for _w in pos_words:
             self.add_mutate(self.pos_ids, _w)
             self.add_mutate(self.gendered_ids, _w)
+        
+        self.neg_ids_train, self.neg_ids_test = self.split_train_test(self.neg_ids)
+        self.pos_ids_train, self.pos_ids_test = self.split_train_test(
+            self.pos_ids)
+        self.test_ids = list(self.neg_ids_test) + list(self.pos_ids_test)
+        self.test_label = [0] * len(self.neg_ids_test) + \
+            [1] * len(self.pos_ids_test)
+
         self.criterion = softmax_cross_entropy
         self.effect_words = 0
         self.pos_words = 0
         self.tot_words = 0
 
+    def split_train_test(self, _set, test_portion = 0.2):
+        _lst = sorted(_set, )
+        np.random.seed(0)
+        _set_train = set()
+        _set_test = set()
+        for _elem in _lst:
+            _v = np.random.uniform()
+            if _v > test_portion:
+                _set_train.add(_elem)
+            else:
+                _set_test.add(_elem)
+        return _set_train, _set_test
+
     def add_ids(self, _set, word):
-         if word in self.word2idx:
-             _set.add(self.word2idx[word])
-
+        if word in self.word2idx:
+            _set.add(self.word2idx[word])
+            return True
+        return False
     def add_mutate(self, _set, word):
-
+        added = False
         words = [word, word.replace("_", " ")]
         for word in words:
-            self.add_ids(_set, word)
-            self.add_ids(_set, word.lower())
-            self.add_ids(_set, word.upper())
-            self.add_ids(_set, word[0].upper()+word[1:].lower())
+
+            added= added or self.add_ids(_set, word)
+            added= added or self.add_ids(_set, word.lower())
+            added= added or self.add_ids(_set, word.upper())
+            added= added or self.add_ids(_set, word[0].upper()+word[1:].lower())
+        if not added:
+            #print(word)
+            pass
         
 
     def get_label(self, word):

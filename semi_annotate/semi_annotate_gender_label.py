@@ -66,6 +66,8 @@ if __name__=="__main__":
         vecs = []
         for pair in pairs:
             # refer to code https://github.com/tolga-b/debiaswe/blob/master/debiaswe/we.py from paper man is to ...
+            if model_name != "w2v":
+                pair = [w.lower() for w in pair]
             vec1, vec2 = get_model_vecs(model, pair)
             vec1 = normalized(vec1)
             vec2 = normalized(vec2)
