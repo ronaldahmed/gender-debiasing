@@ -6,6 +6,8 @@ import fnmatch
 import os
 import gensim.downloader as api
 from tqdm import tqdm
+import itertools
+
 
 models = {
 	"w2v": "word2vec-google-news-300",
@@ -49,36 +51,36 @@ def compute_score_analogy_pairs(x, y, embeds, vocab=None, delta=1):
 			normed_vecs[token] = emb / la.norm(emb)
 		except:
 			continue
+	for token in [x, y]:
+		try:
+			emb = embeds[token]
+			normed_vecs[token] = emb / la.norm(emb)
+		except:
+			assert 0, f"Embedding of {token} not found"
 
 	print(f"> Total # of words in vocab with embedding {len(normed_vecs)}")
 	tokens = normed_vecs.keys()
 
-	try:
-		u = normed_vecs[x] - normed_vecs[y]
-		count = 0
-		for a in tqdm(tokens, desc="Checking words:"):
-			for b in tokens:
-				count += 1
-				if count % 100:
-					print('.')
-				v = normed_vecs[a] - normed_vecs[b]
-				if la.norm(v) > delta or la.norm(v) < 1e-6:
-					continue
-				score = np.dot(u, v) / (np.norm(u) * np.norm(v))
-				ranking.append((a, b, score))
-		ranking = sorted(ranking, key=lambda pair: pair[2], reverse=True)
-	except:
-		print(f"Embedding of {x} or {y} not found")
+	u = normed_vecs[x] - normed_vecs[y]
+	for a, b in tqdm(itertools.product(tokens, tokens), desc="Checking words:"):
+		v = normed_vecs[a] - normed_vecs[b]
+		if la.norm(v) > delta or la.norm(v) < 1e-6:
+			continue
+		score = np.dot(u, v) / (np.norm(u) * np.norm(v))
+		ranking.append((a, b, score))
+	ranking = sorted(ranking, key=lambda pair: pair[2], reverse=True)
 
 	return ranking
 
 
 def save_ranking(ranking, fname):
+	print(f"Saving ranking to {fname}")
 	with open(fname, "w") as ff:
 		yaml.dump(ranking, ff)
 
 
 def load_ranking(fname):
+	print(f"Loading ranking from {fname}")
 	with open(fname, "r") as ff:
 		ranking = yaml.load(ff)
 	return ranking
@@ -109,7 +111,6 @@ if __name__ == '__main__':
 			vocab = yaml.load(f)
 
 	if args.show_ranking:
-		print(f"Loading ranking from {args.show_ranking}")
 		pair_scores = load_ranking(args.show_ranking)
 		show_ranking(pair_scores, top=args.top, filter_words=args.filter)
 	else:
@@ -119,16 +120,13 @@ if __name__ == '__main__':
 				embeds = yaml.load(f)
 			pair_scores = compute_score_analogy_pairs(args.x, args.y, embeds, vocab=vocab, delta=1)
 			id_file = len(fnmatch.filter(os.listdir("./yaml_data/"), 'ranking_#*.yaml')) + 1
-			print("Saving ranking...")
 			save_ranking(pair_scores, f"./yaml_data/ranking_#{id_file}.yaml")
 			show_ranking(pair_scores, top=args.top, filter_words=args.filter)
 		else:
 			print(f"Loading model {args.model}")
 			model = api.load(models[args.model])
-			print("Computing scores...")
 			pair_scores = compute_score_analogy_pairs(args.x, args.y, model.wv, vocab=vocab, delta=1)
 			id_file = len(fnmatch.filter(os.listdir("./yaml_data/"), f'ranking_model_{args.model}_#*.yaml')) + 1
-			print("Saving ranking...")
 			save_ranking(pair_scores, f"./yaml_data/ranking_model_{args.model}_#{id_file}.yaml")
 			show_ranking(pair_scores, top=args.top, filter_words=args.filter)
 
