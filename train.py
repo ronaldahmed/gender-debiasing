@@ -6,6 +6,7 @@ import random
 import argparse
 import torch
 import numpy as np
+import json
 
 from tqdm import tqdm
 from torch.optim import Adam, SGD
@@ -142,7 +143,7 @@ def train(args):
     d = common_prepare(args)
     idx2word, word2idx, model, sgns, gc_i, gc_o, gc_loss, gc_iter, test_ids, test_labels, optim, criterion, optim_D, beta, log_dir = d.lst
         
-
+    logf = open("EXP_%s.log" % args.exp_id, "w")
     if args.load_model != -1:
         optimpath = os.path.join(log_dir, "optim_%d.pt" % args.load_model)
         optim.load_state_dict(torch.load(optimpath))
@@ -167,7 +168,9 @@ def train(args):
 
             Eloss = Eloss1
             Eloss2 = beta * gc_loss.forward_E(iword, owords[:, 4:5])
-            if epoch>=10 and not args.normal:
+
+
+            if epoch>=0 and not args.normal:
                 # for normal training this part is ignored
                 # warmup for classification
                 # (- gc_loss.forward_D(iword, owords[:, 4:5]))  #
@@ -179,7 +182,7 @@ def train(args):
 
             """"""
             ## The loss for gender classifier
-            if epoch>=5:
+            if epoch>=0:
                 #warmup for w2v
                 gc_i.train()
                 gc_o.train()
@@ -203,20 +206,27 @@ def train(args):
                 Dloss.backward()
                 optim_D.step()
 
-                pbar.set_postfix(dict(#acci=acci.item(),
-                                    #acco=acco.item(),
-                                    acci=gci_acc.item(),
-                                    ## gendered words percentage or signal rate
-                                    sr=float(gc_loss.effect_words) / (gc_loss.tot_words +1e-5),
-                                    ## pos gendered words percentage or positve rate
-                                    pr=float(gc_loss.pos_words) / (gc_loss.effect_words+1e-5),
-                                    Dloss=Dloss.item(),#(Dloss1.item(), Dloss2.item()),
-                                    Eloss1=Eloss1.item(),
-                                    Eloss2=Eloss2.item()))
+                rd = dict(  # acci=acci.item(),
+                    #acco=acco.item(),
+                    acci=gci_acc.item(),
+                    ## gendered words percentage or signal rate
+                    sr=float(gc_loss.effect_words) / \
+                    (gc_loss.tot_words + 1e-5),
+                    ## pos gendered words percentage or positve rate
+                    pr=float(gc_loss.pos_words) / \
+                    (gc_loss.effect_words+1e-5),
+                    Dloss=Dloss.item(),  # (Dloss1.item(), Dloss2.item()),
+                    Eloss1=Eloss1.item(),
+                    Eloss2=Eloss2.item())
+
+                pbar.set_postfix(rd)
 
             #if cnt > 2:
             #    break
             cnt += 1
+        rd["epoch"] = epoch
+        logf.write(json.dumps(rd)+"\r\n")
+        logf.flush()
 
         ## run eval here & save progress
         if epoch % 10==0:
