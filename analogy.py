@@ -44,8 +44,12 @@ def compute_score_analogy_pairs(x, y, embeds, vocab=None, delta=1):
 		vocab = embeds.keys()
 
 	for token in vocab:
-		emb = embeds[token]
-		normed_vecs[token] = emb / la.norm(emb)
+		try:
+			emb = embeds[token]
+			normed_vecs[token] = emb / la.norm(emb)
+		except:
+			continue
+
 	tokens = normed_vecs.keys()
 
 	try:
@@ -94,14 +98,17 @@ if __name__ == '__main__':
 	args = parse_args()
 	vocab = None
 	if args.vocab:
+		print(f"Loading vocab from {args.vocab}")
 		with open(args.vocab, "r") as f:
 			vocab = yaml.load(f)
 
 	if args.show_ranking:
+		print(f"Loading ranking from {args.show_ranking}")
 		pair_scores = load_ranking(args.show_ranking)
 		show_ranking(pair_scores, top=args.top, filter_words=args.filter)
 	else:
 		if args.embeds_path:
+			print(f"Loading embeddings from {args.embeds_path}")
 			with open(args.embeds_path, "r") as f:
 				embeds = yaml.load(f)
 			print("Computing scores...")
