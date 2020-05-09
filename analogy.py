@@ -50,7 +50,7 @@ def compute_score_analogy_pairs(x, y, embeds, vocab=None, delta=1):
 
 	try:
 		u = normed_vecs[x] - normed_vecs[y]
-		for (a, b) in tqdm(itertools.product(tokens, tokens)):
+		for (a, b) in tqdm(itertools.product(tokens, tokens), desc="Checking pairs:"):
 			v = normed_vecs[a] - normed_vecs[b]
 			if la.norm(v) > delta:
 				continue
@@ -104,15 +104,19 @@ if __name__ == '__main__':
 		if args.embeds_path:
 			with open(args.embeds_path, "r") as f:
 				embeds = yaml.load(f)
+			print("Computing scores...")
 			pair_scores = compute_score_analogy_pairs(args.x, args.y, embeds, vocab=vocab, delta=1)
 			id_file = len(fnmatch.filter(os.listdir("./yaml_data/"), 'ranking_#*.yaml')) + 1
+			print("Saving ranking...")
 			save_ranking(pair_scores, f"./yaml_data/ranking_#{id_file}.yaml")
 			show_ranking(pair_scores, top=args.top, filter_words=args.filter)
 		else:
-			print(f"Using model {args.model}")
+			print(f"Loading model {args.model}")
 			model = api.load(models[args.model])
-			pair_scores = compute_score_analogy_pairs(args.x, args.y, model, vocab=vocab, delta=1)
+			print("Computing scores...")
+			pair_scores = compute_score_analogy_pairs(args.x, args.y, model.wv, vocab=vocab, delta=1)
 			id_file = len(fnmatch.filter(os.listdir("./yaml_data/"), f'ranking_model_{args.model}_#*.yaml')) + 1
+			print("Saving ranking...")
 			save_ranking(pair_scores, f"./yaml_data/ranking_model_{args.model}_#{id_file}.yaml")
 			show_ranking(pair_scores, top=args.top, filter_words=args.filter)
 
