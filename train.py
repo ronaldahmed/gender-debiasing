@@ -34,7 +34,9 @@ def parse_args():
     parser.add_argument('--conti', action='store_true', help="continue learning")
     parser.add_argument('--weights', action='store_true', help="use weights for negative sampling")
     parser.add_argument('--cuda', action='store_true', help="use CUDA")
+
     parser.add_argument('--DLossBeta', type=float, default=1., help="weight of Discriminator Loss in W2V training")
+    parser.add_argument('--gc_dim', type=int, default=4, help="hidden layer units of gender classifier")
     parser.add_argument('--normal', action="store_true", help="training word embeddgings normally without adversarial part")
     return parser.parse_args()
 
@@ -73,62 +75,78 @@ def get_pos_neg_iter(neg_ids, pos_ids, batch_size = 1024, repeat= True):
             yield np.concatenate([neg_ids[i*batch_sz:(i+1)*batch_sz],pos_ids[i*batch_sz:(i+1)*batch_sz]], axis=0), np.array([0]*batch_sz+[1]*batch_sz)
         if not repeat:
             break
-        
+
+class common_prepare():
+    def __init__(self, args):
+        idx2word = pickle.load(
+            open(os.path.join(args.data_dir, 'idx2word.dat'), 'rb'))
+        word2idx = pickle.load(
+            open(os.path.join(args.data_dir, 'word2idx.dat'), 'rb'))
+        wc = pickle.load(open(os.path.join(args.data_dir, 'wc.dat'), 'rb'))
+        wf = np.array([wc[word] for word in idx2word])
+        wf = wf / wf.sum()
+        ws = 1 - np.sqrt(args.ss_t / wf)
+        ws = np.clip(ws, 0, 1)
+        vocab_size = len(idx2word)
+        weights = wf if args.weights else None
+        if not os.path.isdir(args.save_dir):
+            os.mkdir(args.save_dir)
+        log_dir = os.path.join(args.save_dir, args.exp_id)
+        if not os.path.isdir(log_dir):
+            os.mkdir(log_dir)
+
+        model = Word2Vec(vocab_size=vocab_size, embedding_size=args.e_dim)
+        sgns = SGNS(embedding=model, vocab_size=vocab_size,
+                    n_negs=args.n_negs, weights=weights)
+
+        only_one_classifier = False
+        ## create gender classifier, currently it is 2-layer mlp
+        gc_i = GenderClassifier(args.e_dim, hidden_units=args.gc_dim)
+        if only_one_classifier:
+            gc_o = gc_i
+        else:
+            gc_o = GenderClassifier(args.e_dim, hidden_units=args.gc_dim)
+
+        if args.load_model != -1:
+            model_name = os.path.join(log_dir, "model_%d.pt" % args.load_model)
+            sgns.load_state_dict(torch.load(model_name))
+
+        if args.cuda:
+            sgns = sgns.cuda()
+            gc_i = gc_i.cuda()
+            gc_o = gc_o.cuda()
+
+        gc_loss = GetGenderLoss(embedding=model, iclassifier=gc_i,
+                                oclassifier=gc_o, word2idx=word2idx)
+        gc_iter = get_pos_neg_iter(
+            gc_loss.neg_ids_train, gc_loss.pos_ids_train, batch_size=128)
+        test_ids, test_labels = gc_loss.test_ids, torch.LongTensor(
+            gc_loss.test_label).cuda()
+
+        criterion = torch.nn.CrossEntropyLoss()
+        optim = Adam(sgns.parameters())
+        optim_D = Adam(list(gc_i.parameters()) +
+                    list(gc_o.parameters()))  # , lr=1e-2)
+        beta = args.DLossBeta
+
+        localvars = {"idx2word": idx2word, "word2idx": word2idx, "model" : model, "sgns":sgns, "gc_i":gc_i, "gc_o":gc_o, "gc_loss":gc_loss, "gc_iter":gc_iter, 
+                     "test_ids": test_ids, "test_labels": test_labels, "optim": optim, "criterion": criterion, "optim_D": optim_D, "beta": beta, "log_dir": log_dir}
+        self.lst = []        
+        for k,v in localvars.items():
+            setattr(self, k, v)
+            self.lst.append(v)
+
+
 
 def train(args):
-    idx2word = pickle.load(open(os.path.join(args.data_dir, 'idx2word.dat'), 'rb'))
-    word2idx = pickle.load(
-        open(os.path.join(args.data_dir, 'word2idx.dat'), 'rb'))
-    wc = pickle.load(open(os.path.join(args.data_dir, 'wc.dat'), 'rb'))
-    wf = np.array([wc[word] for word in idx2word])
-    wf = wf / wf.sum()
-    ws = 1 - np.sqrt(args.ss_t / wf)
-    ws = np.clip(ws, 0, 1)
-    vocab_size = len(idx2word)
-    weights = wf if args.weights else None
-    if not os.path.isdir(args.save_dir):
-        os.mkdir(args.save_dir)
-    log_dir = os.path.join(args.save_dir,args.exp_id)
-    if not os.path.isdir(log_dir):
-        os.mkdir(log_dir)
+    d = common_prepare(args)
+    idx2word, word2idx, model, sgns, gc_i, gc_o, gc_loss, gc_iter, test_ids, test_labels, optim, criterion, optim_D, beta, log_dir = d.lst
+        
 
-    model = Word2Vec(vocab_size=vocab_size, embedding_size=args.e_dim)
-    sgns = SGNS(embedding=model, vocab_size=vocab_size, n_negs=args.n_negs, weights=weights)
-
-
-    only_one_classifier = False
-    ## create gender classifier, currently it is 2-layer mlp
-    gc_i = GenderClassifier(args.e_dim)
-    if only_one_classifier:
-        gc_o = gc_i
-    else:
-        gc_o = GenderClassifier(args.e_dim)
-
-    
-    # load pre-trained model
-    if args.load_model != -1:
-        model_name =  os.path.join(log_dir, "model_%d.pt" % args.load_model)
-        sgns.load_state_dict(torch.load(model_name))
-
-    if args.cuda:
-        sgns = sgns.cuda()
-        gc_i = gc_i.cuda()
-        gc_o = gc_o.cuda()
-
-    gc_loss = GetGenderLoss(embedding=model, iclassifier=gc_i,
-                            oclassifier=gc_o, word2idx=word2idx)
-    gc_iter = get_pos_neg_iter(
-        gc_loss.neg_ids_train, gc_loss.pos_ids_train, batch_size=128)
-    test_ids, test_labels = gc_loss.test_ids, torch.LongTensor(gc_loss.test_label).cuda()
-
-    criterion = torch.nn.CrossEntropyLoss()
-    optim = Adam(sgns.parameters())
     if args.load_model != -1:
         optimpath = os.path.join(log_dir, "optim_%d.pt" % args.load_model)
         optim.load_state_dict(torch.load(optimpath))
 
-    optim_D = Adam(list(gc_i.parameters()) + list(gc_o.parameters()))#, lr=1e-2)
-    beta = args.DLossBeta
     for epoch in range(args.epoch):
         dataset = PermutedSubsampledCorpus(os.path.join(args.data_dir, 'train.dat'))
         dataloader = DataLoader(dataset, batch_size=args.mb, shuffle=True)
@@ -222,60 +240,14 @@ def train(args):
 
 def only_train_gc(args):
 
-    idx2word = pickle.load(
-        open(os.path.join(args.data_dir, 'idx2word.dat'), 'rb'))
-    word2idx = pickle.load(
-        open(os.path.join(args.data_dir, 'word2idx.dat'), 'rb'))
-    wc = pickle.load(open(os.path.join(args.data_dir, 'wc.dat'), 'rb'))
-    wf = np.array([wc[word] for word in idx2word])
-    wf = wf / wf.sum()
-    ws = 1 - np.sqrt(args.ss_t / wf)
-    ws = np.clip(ws, 0, 1)
+    args.load_model = 100
+    d = common_prepare(args)
+    idx2word, word2idx, model, sgns, gc_i, gc_o, gc_loss, gc_iter, test_ids, test_labels, optim, criterion, optim_D, beta, log_dir = d.lst
+
     vocab_size = len(idx2word)
-    weights = wf if args.weights else None
-    if not os.path.isdir(args.save_dir):
-        os.mkdir(args.save_dir)
-    log_dir = os.path.join(args.save_dir, args.exp_id)
-    if not os.path.isdir(log_dir):
-        os.mkdir(log_dir)
-
-    model = Word2Vec(vocab_size=vocab_size, embedding_size=args.e_dim)
-    sgns = SGNS(embedding=model, vocab_size=vocab_size,
-                n_negs=args.n_negs, weights=weights)
-
-    only_one_classifier = False
-    ## create gender classifier, currently it is 2-layer mlp
-    gc_i = GenderClassifier(args.e_dim)
-    if only_one_classifier:
-        gc_o = gc_i
-    else:
-        gc_o = GenderClassifier(args.e_dim)
-
-    if args.load_model == -1:
-        args.load_model = 100
-
-    gc_i_path = os.path.join(log_dir, "gci_%d.pt" % args.load_model)
-    gc_i.load_state_dict(torch.load(gc_i_path))
-    model_name = os.path.join(log_dir, "model_%d.pt" % args.load_model)
-    sgns.load_state_dict(torch.load(model_name))
-
-    if args.cuda:
-        sgns = sgns.cuda()
-        gc_i = gc_i.cuda()
-        gc_o = gc_o.cuda()
-
-    gc_loss = GetGenderLoss(embedding=model, iclassifier=gc_i,
-                            oclassifier=gc_o, word2idx=word2idx)
     print("vocab_size", vocab_size, "gendered_neg_size", len(
         gc_loss.neg_ids), "gendered_pos_size", len(gc_loss.pos_ids))
 
-    test_ids, test_labels = gc_loss.test_ids, torch.LongTensor(
-        gc_loss.test_label).cuda()
-    criterion = torch.nn.CrossEntropyLoss()
-    optim = Adam(sgns.parameters())
-
-    optim_D = Adam(list(gc_i.parameters()) + list(gc_o.parameters()))
-    beta = args.DLossBeta
     acc = 0.
     cnt = 0
     for epoch in range(1000):
@@ -311,58 +283,9 @@ def only_train_gc(args):
 
 
 def eval_gender_classifier(args):
-    idx2word = pickle.load(open(os.path.join(args.data_dir, 'idx2word.dat'), 'rb'))
-    word2idx = pickle.load(
-        open(os.path.join(args.data_dir, 'word2idx.dat'), 'rb'))
-    wc = pickle.load(open(os.path.join(args.data_dir, 'wc.dat'), 'rb'))
-    wf = np.array([wc[word] for word in idx2word])
-    wf = wf / wf.sum()
-    ws = 1 - np.sqrt(args.ss_t / wf)
-    ws = np.clip(ws, 0, 1)
-    vocab_size = len(idx2word)
-    weights = wf if args.weights else None
-    if not os.path.isdir(args.save_dir):
-        os.mkdir(args.save_dir)
-    log_dir = os.path.join(args.save_dir,args.exp_id)
-    if not os.path.isdir(log_dir):
-        os.mkdir(log_dir)
+    d = common_prepare(args)
+    idx2word, word2idx, model, sgns, gc_i, gc_o, gc_loss, gc_iter, test_ids, test_labels, optim, criterion, optim_D, beta, log_dir = d.lst
 
-    model = Word2Vec(vocab_size=vocab_size, embedding_size=args.e_dim)
-    sgns = SGNS(embedding=model, vocab_size=vocab_size,
-                n_negs=args.n_negs, weights=weights)
-
-    only_one_classifier = False
-    ## create gender classifier, currently it is 2-layer mlp
-    gc_i = GenderClassifier(args.e_dim)
-    if only_one_classifier:
-        gc_o = gc_i
-    else:
-        gc_o = GenderClassifier(args.e_dim)
-
-    if args.load_model == -1:
-        args.load_model = 90
-
-
-    gc_i_path = os.path.join(log_dir, "gci_%d.pt" % args.load_model)
-    gc_i.load_state_dict(torch.load(gc_i_path))
-    model_name =  os.path.join(log_dir, "model_%d.pt" % args.load_model)
-    sgns.load_state_dict(torch.load(model_name))
-
-    if args.cuda:
-        sgns = sgns.cuda()
-        gc_i = gc_i.cuda()
-        gc_o = gc_o.cuda()
-
-    gc_loss = GetGenderLoss(embedding=model, iclassifier=gc_i,
-                            oclassifier=gc_o, word2idx=word2idx)
-    print("vocab_size", vocab_size, "gendered_neg_size", len(
-        gc_loss.neg_ids), "gendered_pos_size", len(gc_loss.pos_ids))
-    criterion = torch.nn.CrossEntropyLoss()
-    optim = Adam(sgns.parameters())
-    criterion = torch.nn.CrossEntropyLoss()
-
-    optim_D = SGD(list(gc_i.parameters()) + list(gc_o.parameters()), lr=1e-2)
-    beta = args.DLossBeta
     acc = 0.
     cnt = 0
     for batch in tqdm(get_pos_neg_iter(gc_loss.neg_ids, gc_loss.pos_ids, batch_size=512, repeat=False)):
