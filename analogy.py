@@ -37,6 +37,7 @@ def compute_score_analogy_pairs(x, y, embeds, vocab=None, delta=1):
 	:param delta: threshold for semantic similarity of analogy pairs (delta = 1)
 	:return: List of (a,b,score) tuples ranked by their score in non-increasing order, i.e., ranking[0] has higher score
 	"""
+	print("Computing scores...")
 	ranking = []
 	normed_vecs = {}
 	if vocab is None:
@@ -67,7 +68,7 @@ def compute_score_analogy_pairs(x, y, embeds, vocab=None, delta=1):
 				ranking.append((a, b, score))
 		ranking = sorted(ranking, key=lambda pair: pair[2], reverse=True)
 	except:
-		assert f"Embedding of {x} or {y} not found"
+		print(f"Embedding of {x} or {y} not found")
 
 	return ranking
 
@@ -116,7 +117,6 @@ if __name__ == '__main__':
 			print(f"Loading embeddings from {args.embeds_path}")
 			with open(args.embeds_path, "r") as f:
 				embeds = yaml.load(f)
-			print("Computing scores...")
 			pair_scores = compute_score_analogy_pairs(args.x, args.y, embeds, vocab=vocab, delta=1)
 			id_file = len(fnmatch.filter(os.listdir("./yaml_data/"), 'ranking_#*.yaml')) + 1
 			print("Saving ranking...")
