@@ -55,7 +55,11 @@ def compute_score_analogy_pairs(x, y, embeds, vocab=None, delta=1):
 
 	try:
 		u = normed_vecs[x] - normed_vecs[y]
-		for (a, b) in tqdm(itertools.product(tokens, tokens), desc="Checking pairs:", total=len(normed_vecs)**2):
+		count = 0
+		for a, b in tqdm(itertools.product(tokens, tokens), desc="Checking pairs:", total=len(normed_vecs)**2):
+			count+=1
+			if count % 100:
+				print('.')
 			v = normed_vecs[a] - normed_vecs[b]
 			if la.norm(v) > delta or la.norm(v) < 1e-6:
 				continue
