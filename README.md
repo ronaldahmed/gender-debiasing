@@ -26,7 +26,9 @@ Baseline: Training the normal w2v embedding
 python train.py --mode="train" --cuda --normal --exp_id="sgns_normal"
 
 Adversarial Trained Embedding:
-python train.py --mode="train" --cuda --DLossBeta=0.1 --gc_dim=4 --exp_id="sgns_normal"
+python train.py --mode="train" --cuda --DLossBeta=0.1 --gc_dim=4 --exp_id="sgns"
 
 Evaluating the gender bias of embedding:
 python train.py --mode="traingc" --cuda --gc_dim=4 --exp_id="YOUR TRAINED EXP ID"
+
+If you want to run it on CPU, you need to manually remove some of the .cuda() in the code.
