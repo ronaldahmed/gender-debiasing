@@ -10,7 +10,7 @@ import itertools
 import ray
 
 
-ray.init(num_cpus=30)
+ray.init()
 
 models = {
 	"w2v": "word2vec-google-news-300",
@@ -33,13 +33,13 @@ def parse_args():
 
 
 @ray.remote
-def compute_score(u, w1, w2, embeds, delta=1):
+def compute_score(u, w1, w2, embeds):
 	v = embeds[w1] - embeds[w2]
-	if la.norm(v) > delta or la.norm(v) < 1e-6:
-		return -1
-	return np.dot(u, v) / (la.norm(u) * la.norm(v))
+	score = np.dot(u, v) / (la.norm(u) * la.norm(v))
+	return w1, w2, score
 
 
+@ray.remote
 def is_neighbor(u, v, embeds, delta=1):
 	d = embeds[u] - embeds[v]
 	if delta >= la.norm(d) >= 1e-8:
@@ -49,10 +49,9 @@ def is_neighbor(u, v, embeds, delta=1):
 
 @ray.remote
 def compute_neighbors(w, embeds, delta=1):
-	N = []
-	for token in embeds:
-		if is_neighbor(w, token, embeds, delta=delta):
-			N.append(token)
+	N = [token for token in embeds if is_neighbor.remote(w, token, embeds, delta=delta)]
+	N = ray.get(N)
+	N.append(w)
 	print(f"Neighbor size {w}: {len(N)}")
 	return N
 
@@ -91,27 +90,20 @@ def compute_score_analogy_pairs(x, y, embeds, vocab=None, delta=1):
 	tokens = normed_vecs.keys()
 	u = normed_vecs[x] - normed_vecs[y]
 
-	print("Computing neighbors")
-	neighbors = []
-	count = 0
-	# tokens2 = []
-	for token in tokens:
-		count += 1
-		if count % 100 == 0:
-			print("-")
-
-		# tokens2.append(token)
-		neighbors.append(compute_neighbors.remote(token, normed_vecs, delta=delta))
+	# normed_vecs_id = ray.put(normed_vecs)
+	# delta_id = ray.put(delta)
+	normed_vecs_id = normed_vecs
+	delta_id = delta
+	neighbors = [compute_neighbors.remote(token, normed_vecs_id, delta=delta_id) for token in tokens]
 
 	# assert tokens == tokens2
-
-	print("Finished loading to threads, now computing...")
-	ray.get(neighbors)
+	print("Computing neighbors")
+	neighbors = ray.get(neighbors)
 	print("Finished computing neighbors")
 
-	for a, Na in zip(tokens, neighbors):
-		for b in Na:
-			ranking.append((a, b, compute_score.remote(u, a, b, normed_vecs, delta=delta)))
+	for i in range(len(neighbors)):
+		a = neighbors[i][-1]
+		ranking += [compute_score.remote(u, a, b, normed_vecs_id, delta=delta_id) for b in neighbors[i][:-1]]
 	print("Getting values multiprocessed")
 	ranking = ray.get(ranking)
 	ranking = sorted(ranking, key=lambda pair: pair[2], reverse=True)
