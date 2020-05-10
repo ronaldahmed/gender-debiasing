@@ -175,8 +175,9 @@ if __name__ == '__main__':
 	else:
 		if args.embeds_path:
 			print(f"Loading embeddings from {args.embeds_path}")
-			with open(args.embeds_path, "r") as f:
-				embeds = yaml.load(f)
+			# with open(args.embeds_path, "r") as f:
+			# 	embeds = yaml.load(f)
+			embeds = load_embeddings(args.embeds_path)
 			pair_scores = compute_score_analogy_pairs(args.x, args.y, embeds, vocab=vocab, delta=1)
 			id_file = len(fnmatch.filter(os.listdir("./yaml_data/"), 'ranking_#*.yaml')) + 1
 			save_ranking(pair_scores, f"./yaml_data/ranking_#{id_file}.yaml")
