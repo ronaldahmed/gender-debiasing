@@ -39,7 +39,7 @@ def compute_score(u, w1, w2, embeds):
 	return w1, w2, score
 
 
-@ray.remote
+# @ray.remote
 def is_neighbor(u, v, embeds, delta=1):
 	d = embeds[u] - embeds[v]
 	if delta >= la.norm(d) >= 1e-8:
