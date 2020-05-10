@@ -90,10 +90,10 @@ def compute_score_analogy_pairs(x, y, embeds, vocab=None, delta=1):
 	tokens = normed_vecs.keys()
 	u = normed_vecs[x] - normed_vecs[y]
 
-	# normed_vecs_id = ray.put(normed_vecs)
-	# delta_id = ray.put(delta)
-	normed_vecs_id = normed_vecs
-	delta_id = delta
+	normed_vecs_id = ray.put(normed_vecs)
+	delta_id = ray.put(delta)
+	# normed_vecs_id = normed_vecs
+	# delta_id = delta
 	neighbors = [compute_neighbors.remote(token, normed_vecs_id, delta=delta_id) for token in tokens]
 
 	# assert tokens == tokens2
