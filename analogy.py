@@ -50,7 +50,7 @@ def is_neighbor(u, v, embeds, delta=1):
 @ray.remote
 def compute_neighbors(w, embeds, delta=1):
 	N = [token for token in embeds if is_neighbor(w, token, embeds, delta=delta)]
-	N = ray.get(N)
+	# N = ray.get(N)
 	N.append(w)
 	print(f"Neighbor size {w}: {len(N)}")
 	return N
