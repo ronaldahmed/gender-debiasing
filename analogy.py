@@ -138,7 +138,7 @@ def load_embeddings(fname):
 				line = line.split(" ")
 				if len(line) > 2:
 					embeds[line[0]] = np.array(line[1:])
-		k = embeds.keys()[0]
+		k = list(embeds.keys())[0]
 		print(f"Finished loading embeds, total words: {len(embeds)}, size of embedding: {len(embeds[k])}")
 	else:
 		assert 0, f"error reading {fname}"
