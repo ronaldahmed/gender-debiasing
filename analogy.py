@@ -53,6 +53,7 @@ def compute_neighbors(w, embeds, delta=1):
 	for token in embeds:
 		if is_neighbor(w, token, embeds, delta=delta):
 			N.append(token)
+	print(f"Neighbor size {w}: {len(N)}")
 	return N
 
 
@@ -90,15 +91,25 @@ def compute_score_analogy_pairs(x, y, embeds, vocab=None, delta=1):
 	u = normed_vecs[x] - normed_vecs[y]
 
 	print("Computing neighbors")
-	neighbors = {}
+	neighbors = []
+	count = 0
+	tokens2 = []
 	for token in tokens:
-		neighbors[token] = compute_neighbors.remote(token, normed_vecs, delta=delta)
+		count += 1
+		if count % 100:
+			print("-")
+
+		tokens2.append(token)
+		neighbors.append(compute_neighbors.remote(token, normed_vecs, delta=delta))
+
+	assert tokens == tokens2
+
 	print("Finished loading to threads, now computing...")
 	ray.get(neighbors)
 	print("Finished computing neighbors")
 
-	for a in tokens:
-		for b in neighbors[a]:
+	for a, Na in zip(tokens, neighbors):
+		for b in Na:
 			ranking.append((a, b, compute_score.remote(u, a, b, normed_vecs, delta=delta)))
 	print("Getting values multiprocessed")
 	ranking = ray.get(ranking)
