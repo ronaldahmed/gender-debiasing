@@ -10,7 +10,7 @@ import itertools
 import ray
 
 
-ray.init(num_cpus=20)
+ray.init(num_cpus=30)
 
 models = {
 	"w2v": "word2vec-google-news-300",
@@ -81,6 +81,7 @@ def compute_score_analogy_pairs(x, y, embeds, vocab=None, delta=1):
 			continue
 	for token in [x, y]:
 		try:
+
 			emb = embeds[token]
 			normed_vecs[token] = emb / la.norm(emb)
 		except:
@@ -93,16 +94,16 @@ def compute_score_analogy_pairs(x, y, embeds, vocab=None, delta=1):
 	print("Computing neighbors")
 	neighbors = []
 	count = 0
-	tokens2 = []
+	# tokens2 = []
 	for token in tokens:
 		count += 1
 		if count % 100 == 0:
 			print("-")
 
-		tokens2.append(token)
+		# tokens2.append(token)
 		neighbors.append(compute_neighbors.remote(token, normed_vecs, delta=delta))
 
-	assert tokens == tokens2
+	# assert tokens == tokens2
 
 	print("Finished loading to threads, now computing...")
 	ray.get(neighbors)
@@ -136,8 +137,11 @@ def load_embeddings(fname):
 		with open(fname, "r") as ff:
 			for line in ff:
 				line = line.split(" ")
+				line[-1] = line[-1][:-1]
+				token = line[0]
+				vec = np.array([float(num) for num in line[1:]])
 				if len(line) > 2:
-					embeds[line[0]] = np.array(line[1:])
+					embeds[token] = np.array(vec)
 		k = list(embeds.keys())[0]
 		print(f"Finished loading embeds, total words: {len(embeds)}, size of embedding: {len(embeds[k])}")
 	else:
