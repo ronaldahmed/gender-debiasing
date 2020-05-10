@@ -93,6 +93,7 @@ def compute_score_analogy_pairs(x, y, embeds, vocab=None, delta=1):
 	neighbors = {}
 	for token in tokens:
 		neighbors[token] = compute_neighbors.remote(token, normed_vecs, delta=delta)
+	print("Finished loading to threads, now computing...")
 	ray.get(neighbors)
 	print("Finished computing neighbors")
 
