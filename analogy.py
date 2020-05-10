@@ -132,7 +132,7 @@ def load_ranking(fname):
 
 def load_embeddings(fname):
 	embeds = {}
-	if fname.split('/')[-1] == 'vec':
+	if fname.split('.')[-1] == 'vec':
 		with open(fname, "r") as ff:
 			for line in ff:
 				line = line.split(" ")
