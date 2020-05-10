@@ -7,7 +7,10 @@ import os
 import gensim.downloader as api
 from tqdm import tqdm
 import itertools
+import ray
 
+
+ray.init()
 
 models = {
 	"w2v": "word2vec-google-news-300",
@@ -27,6 +30,14 @@ def parse_args():
 	parser.add_argument('--y', type=str, help="Word")
 	parser.add_argument('--vocab', type=str, default='', help="Path to Vocab YAML file, can be set or dict of word->index")
 	return parser.parse_args()
+
+
+@ray.remote
+def compute_score(u, w1, w2, embeds, delta=1):
+	v = embeds[w1] - embeds[w2]
+	if la.norm(v) > delta or la.norm(v) < 1e-6:
+		return -1
+	return np.dot(u, v) / (la.norm(u) * la.norm(v))
 
 
 def compute_score_analogy_pairs(x, y, embeds, vocab=None, delta=1):
@@ -63,13 +74,9 @@ def compute_score_analogy_pairs(x, y, embeds, vocab=None, delta=1):
 
 	u = normed_vecs[x] - normed_vecs[y]
 	for a, b in tqdm(itertools.product(tokens, tokens), desc="Checking words", total=len(normed_vecs)**2):
-		v = normed_vecs[a] - normed_vecs[b]
-		if la.norm(v) > delta or la.norm(v) < 1e-6:
-			continue
-		score = np.dot(u, v) / (la.norm(u) * la.norm(v))
-		ranking.append((a, b, score))
+		ranking.append((a, b, compute_score.remote(u, a, b, normed_vecs, delta=delta)))
+	ranking = ray.get(ranking)
 	ranking = sorted(ranking, key=lambda pair: pair[2], reverse=True)
-
 	return ranking
 
 
