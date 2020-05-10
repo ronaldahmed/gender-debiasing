@@ -103,7 +103,7 @@ def compute_score_analogy_pairs(x, y, embeds, vocab=None, delta=1):
 
 	for i in range(len(neighbors)):
 		a = neighbors[i][-1]
-		ranking += [compute_score.remote(u, a, b, normed_vecs_id, delta=delta_id) for b in neighbors[i][:-1]]
+		ranking += [compute_score.remote(u, a, b, normed_vecs_id) for b in neighbors[i][:-1]]
 	print("Getting values multiprocessed")
 	# ranking = ray.get(ranking)
 	ranking = sorted(ranking, key=lambda pair: pair[2], reverse=True)
