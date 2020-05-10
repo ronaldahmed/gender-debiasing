@@ -73,8 +73,9 @@ def compute_score_analogy_pairs(x, y, embeds, vocab=None, delta=1):
 	tokens = normed_vecs.keys()
 
 	u = normed_vecs[x] - normed_vecs[y]
-	for a, b in tqdm(itertools.product(tokens, tokens), desc="Checking words", total=len(normed_vecs)**2):
+	for a, b in itertools.product(tokens, tokens):
 		ranking.append((a, b, compute_score.remote(u, a, b, normed_vecs, delta=delta)))
+	print("Getting values multiprocessed")
 	ranking = ray.get(ranking)
 	ranking = sorted(ranking, key=lambda pair: pair[2], reverse=True)
 	return ranking
