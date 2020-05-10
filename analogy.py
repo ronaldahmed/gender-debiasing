@@ -10,7 +10,7 @@ import itertools
 import ray
 
 
-ray.init()
+ray.init(num_cpus=20)
 
 models = {
 	"w2v": "word2vec-google-news-300",
@@ -96,7 +96,7 @@ def compute_score_analogy_pairs(x, y, embeds, vocab=None, delta=1):
 	tokens2 = []
 	for token in tokens:
 		count += 1
-		if count % 100:
+		if count % 100 == 0:
 			print("-")
 
 		tokens2.append(token)
