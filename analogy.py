@@ -40,6 +40,22 @@ def compute_score(u, w1, w2, embeds, delta=1):
 	return np.dot(u, v) / (la.norm(u) * la.norm(v))
 
 
+def is_neighbor(u, v, embeds, delta=1):
+	d = embeds[u] - embeds[v]
+	if delta >= la.norm(d) >= 1e-8:
+		return True
+	return False
+
+
+@ray.remote
+def compute_neighbors(w, embeds, delta=1):
+	N = []
+	for token in embeds:
+		if is_neighbor(w, token, embeds, delta=delta):
+			N.append(token)
+	return N
+
+
 def compute_score_analogy_pairs(x, y, embeds, vocab=None, delta=1):
 	"""
 	Compute scores for analogy pairs (a, b) such that Norm(a-b) <= delta
@@ -71,10 +87,18 @@ def compute_score_analogy_pairs(x, y, embeds, vocab=None, delta=1):
 
 	print(f"> Total # of words in vocab with embedding {len(normed_vecs)}")
 	tokens = normed_vecs.keys()
-
 	u = normed_vecs[x] - normed_vecs[y]
-	for a, b in itertools.product(tokens, tokens):
-		ranking.append((a, b, compute_score.remote(u, a, b, normed_vecs, delta=delta)))
+
+	print("Computing neighbors")
+	neighbors = {}
+	for token in tokens:
+		neighbors[token] = compute_neighbors.remote(token, normed_vecs, delta=delta)
+	ray.get(neighbors)
+	print("Finished computing neighbors")
+
+	for a in tokens:
+		for b in neighbors[a]:
+			ranking.append((a, b, compute_score.remote(u, a, b, normed_vecs, delta=delta)))
 	print("Getting values multiprocessed")
 	ranking = ray.get(ranking)
 	ranking = sorted(ranking, key=lambda pair: pair[2], reverse=True)
